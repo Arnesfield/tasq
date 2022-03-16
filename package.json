@@ -1,0 +1,26 @@
+{
+  "name": "@arnesfield/tasq",
+  "version": "0.0.1",
+  "description": "A simple queue for tasks.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arnesfield/tasq.git"
+  },
+  "author": "Jefferson Rylee <rylee.jeff385@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Arnesfield/tasq/issues"
+  },
+  "homepage": "https://github.com/Arnesfield/tasq#readme",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.15.0",
+    "@typescript-eslint/parser": "^5.15.0",
+    "eslint": "^8.11.0",
+    "rimraf": "^3.0.2",
+    "typescript": "^4.6.2"
+  }
+}
