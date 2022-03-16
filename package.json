@@ -4,6 +4,11 @@
   "description": "A simple queue for tasks.",
   "main": "index.js",
   "scripts": {
+    "start": "npm run build -- -w",
+    "build": "tsc",
+    "prebuild": "rimraf lib",
+    "lint": "eslint . --ext .js,.ts",
+    "lint:fix": "npm run lint -- --fix",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
