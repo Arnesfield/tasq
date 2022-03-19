@@ -31,8 +31,8 @@ const task = new Tasq()
     () => console.log('unreached')
   )
   .done(items => console.log('done', items));
-setTimeout(() => task.add(4, 5).run(), 100);
-setTimeout(() => task.add(6).run(), 300);
+setTimeout(() => task.add(3, 4).run(), 100);
+setTimeout(() => task.add(5).run(), 300);
 ```
 
 Output:
@@ -41,11 +41,11 @@ Output:
 [input] 1
 [input] 2
 [last: 2] waiting...
+[input] 3
 [input] 4
+[last: 4] waiting...
 [input] 5
 [last: 5] waiting...
-[input] 6
-[last: 6] waiting...
 finished
-done [ 1, 2, 4, 5, 6 ]
+done [ 1, 2, 3, 4, 5 ]
 ```
