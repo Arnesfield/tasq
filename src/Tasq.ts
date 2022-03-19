@@ -43,7 +43,7 @@ export class Tasq<T> {
   }
 
   getItems(): T[] {
-    return this.items;
+    return Array.from(this.items);
   }
 
   getCurrent(): T | undefined {
@@ -70,11 +70,6 @@ export class Tasq<T> {
 
   catch(callback: TasqErrorCallback<T>): this {
     this.onError = callback;
-    return this;
-  }
-
-  clear(): this {
-    this._clear();
     return this;
   }
 
@@ -139,7 +134,7 @@ export class Tasq<T> {
     }
   }
 
-  private _clear(): T[] {
+  private clear(): T[] {
     this.index = 0;
     const items = this.items.splice(0, this.items.length);
     if (!this.running) {
@@ -148,20 +143,20 @@ export class Tasq<T> {
     return items;
   }
 
-  private finally(callbackIndex: number): TasqResult<T>;
-  private finally(
+  protected finally(callbackIndex: number): TasqResult<T>;
+  protected finally(
     callbackIndex: number,
     error: unknown,
     didError: boolean
   ): TasqResult<T>;
-  private finally(
+  protected finally(
     callbackIndex: number,
     error?: unknown,
     didError = false
   ): TasqResult<T> {
     this.running = false;
     const index = this.index - 1;
-    const items = this._clear();
+    const items = this.clear();
     const result: TasqResult<T> = { items };
     const errorResult: TasqErrorResult<T> = { items, index, callbackIndex };
     if (didError) {
