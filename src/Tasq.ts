@@ -29,8 +29,8 @@ export type TasqErrorCallback<T> = (
 ) => void | Promise<void>;
 
 export class Tasq<T> {
-  private index: number = 0;
-  private callbackIndex: number = 0;
+  private index: number = -1;
+  private callbackIndex: number = -1;
   private running: boolean = false;
   private current: T | undefined;
   private readonly items: T[] = [];
@@ -104,7 +104,10 @@ export class Tasq<T> {
     if (typeof callback === 'function') {
       this.do(callback, ...callbacks);
     }
-    this.callbackIndex = 0;
+    // only reset callbackIndex if there are more items
+    if (this.index < this.items.length - 1) {
+      this.callbackIndex = -1;
+    }
     if (this.running) {
       return;
     }
@@ -113,14 +116,18 @@ export class Tasq<T> {
       this.running = true;
       // don't proceed if first callback can't be fired
       let result: TasqCallbackResult = {
-        break: this.index >= this.items.length
+        break: this.index >= this.items.length - 1
       };
-      while (!result.break && this.callbackIndex < this.callbacks.length) {
-        callbackIndex = this.callbackIndex++;
+      while (!result.break && this.callbackIndex < this.callbacks.length - 1) {
+        // update result if callbackIndex was reset
+        if (this.callbackIndex < callbackIndex) {
+          result = { break: this.index >= this.items.length - 1 };
+        }
+        callbackIndex = ++this.callbackIndex;
         const callback = this.callbacks[callbackIndex];
         // handle first callback
-        while (callbackIndex === 0 && this.index < this.items.length) {
-          const item = this.items[this.index++];
+        while (callbackIndex === 0 && this.index < this.items.length - 1) {
+          const item = this.items[++this.index];
           this.current = item;
           result = (await callback(item, this)) || {};
         }
@@ -135,7 +142,7 @@ export class Tasq<T> {
   }
 
   private clear(): T[] {
-    this.index = 0;
+    this.index = -1;
     const items = this.items.splice(0, this.items.length);
     if (!this.running) {
       this.current = undefined;
@@ -155,7 +162,7 @@ export class Tasq<T> {
     didError = false
   ): TasqResult<T> {
     this.running = false;
-    const index = this.index - 1;
+    const { index } = this;
     const items = this.clear();
     const result: TasqResult<T> = { items };
     const errorResult: TasqErrorResult<T> = { items, index, callbackIndex };
