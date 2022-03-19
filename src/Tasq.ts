@@ -1,7 +1,11 @@
 export interface TasqResult<T> {
   items: T[];
   error?: unknown;
-  didError?: boolean;
+}
+
+export interface TasqErrorResult<T> extends TasqResult<T> {
+  index: number;
+  callbackIndex: number;
 }
 
 export interface TasqCallbackResult {
@@ -10,7 +14,7 @@ export interface TasqCallbackResult {
 }
 
 export type TasqCallback<T> = (
-  item: T,
+  data: T,
   task: Tasq<T>
 ) => TasqCallbackResult | void | Promise<TasqCallbackResult | void>;
 
@@ -18,15 +22,15 @@ export type TasqDoneCallback<T> = (
   items: T[],
   task: Tasq<T>
 ) => void | Promise<void>;
+
 export type TasqErrorCallback<T> = (
-  error: unknown,
-  items: T[],
+  result: TasqErrorResult<T>,
   task: Tasq<T>
 ) => void | Promise<void>;
 
 export class Tasq<T> {
   private index: number = 0;
-  private cbIndex: number = 0;
+  private callbackIndex: number = 0;
   private running: boolean = false;
   private current: T | undefined;
   private readonly items: T[] = [];
@@ -46,8 +50,12 @@ export class Tasq<T> {
     return this.current;
   }
 
-  getIndex(): { items: number; callback: number } {
-    return { items: this.index, callback: this.cbIndex };
+  getIndex(): number {
+    return this.index;
+  }
+
+  getCallbackIndex(): number {
+    return this.callbackIndex;
   }
 
   add(...items: T[]): this {
@@ -101,29 +109,33 @@ export class Tasq<T> {
     if (typeof callback === 'function') {
       this.do(callback, ...callbacks);
     }
-    this.cbIndex = 0;
+    this.callbackIndex = 0;
     if (this.running) {
       return;
     }
+    let { callbackIndex } = this;
     try {
       this.running = true;
-      let result: TasqCallbackResult = {};
-      while (!result.break && this.cbIndex < this.callbacks.length) {
-        const cbIndex = this.cbIndex++;
-        const callback = this.callbacks[cbIndex];
+      // don't proceed if first callback can't be fired
+      let result: TasqCallbackResult = {
+        break: this.index >= this.items.length
+      };
+      while (!result.break && this.callbackIndex < this.callbacks.length) {
+        callbackIndex = this.callbackIndex++;
+        const callback = this.callbacks[callbackIndex];
         // handle first callback
-        while (cbIndex === 0 && this.index < this.items.length) {
+        while (callbackIndex === 0 && this.index < this.items.length) {
           const item = this.items[this.index++];
           this.current = item;
           result = (await callback(item, this)) || {};
         }
-        if (cbIndex > 0 && !result.break) {
+        if (callbackIndex > 0 && !result.break) {
           result = (await callback(result.data, this)) || {};
         }
       }
-      return this.finally();
+      return this.finally(callbackIndex);
     } catch (error: unknown) {
-      return this.finally(error, true);
+      return this.finally(callbackIndex, error, true);
     }
   }
 
@@ -136,21 +148,39 @@ export class Tasq<T> {
     return items;
   }
 
-  private finally(error?: unknown, didError = false): TasqResult<T> {
+  private finally(callbackIndex: number): TasqResult<T>;
+  private finally(
+    callbackIndex: number,
+    error: unknown,
+    didError: boolean
+  ): TasqResult<T>;
+  private finally(
+    callbackIndex: number,
+    error?: unknown,
+    didError = false
+  ): TasqResult<T> {
     this.running = false;
+    const index = this.index - 1;
     const items = this._clear();
-    const result: TasqResult<T> = { items, error, didError };
-    this.finish(result);
+    const result: TasqResult<T> = { items };
+    const errorResult: TasqErrorResult<T> = { items, index, callbackIndex };
+    if (didError) {
+      result.error = error;
+      errorResult.error = error;
+    }
+    this.finish(errorResult, didError);
     return result;
   }
 
-  protected async finish(result: TasqResult<T>): Promise<void> {
-    const { items, error, didError } = result;
+  protected async finish(
+    result: TasqErrorResult<T>,
+    didError: boolean
+  ): Promise<void> {
     try {
       if (didError) {
-        await this.onError?.(error, items, this);
+        await this.onError?.(result, this);
       } else {
-        await this.onDone?.(items, this);
+        await this.onDone?.(result.items, this);
       }
     } catch (error: unknown) {
       const label = didError ? 'error' : 'done';
