@@ -1,7 +1,20 @@
-export interface TasqResult<T> {
+export interface TasqOptions {
+  blocking?: boolean;
+}
+
+export interface TasqDoneResult<T> {
+  nth: number;
   items: T[];
+}
+
+export interface TasqRunResult<T> extends TasqDoneResult<T> {
   error?: unknown;
-  didError?: boolean;
+}
+
+export interface TasqErrorResult<T> extends TasqDoneResult<T> {
+  error?: unknown;
+  index: number;
+  callbackIndex: number;
 }
 
 export interface TasqCallbackResult {
@@ -9,30 +22,42 @@ export interface TasqCallbackResult {
   break?: boolean;
 }
 
+export interface TasqCallbackArgs<T> {
+  data: T;
+  nth: number;
+}
+
 export type TasqCallback<T> = (
-  item: T,
+  args: TasqCallbackArgs<T>,
   task: Tasq<T>
 ) => TasqCallbackResult | void | Promise<TasqCallbackResult | void>;
 
 export type TasqDoneCallback<T> = (
-  items: T[],
+  result: TasqDoneResult<T>,
   task: Tasq<T>
 ) => void | Promise<void>;
+
 export type TasqErrorCallback<T> = (
-  error: unknown,
-  items: T[],
+  result: TasqErrorResult<T>,
   task: Tasq<T>
 ) => void | Promise<void>;
 
 export class Tasq<T> {
+  private nth: number = 0;
   private index: number = 0;
-  private cbIndex: number = 0;
+  private callbackIndex: number = 0;
   private running: boolean = false;
   private current: T | undefined;
   private readonly items: T[] = [];
   private readonly callbacks: TasqCallback<any>[] = [];
   private onDone?: TasqDoneCallback<T>;
   private onError?: TasqErrorCallback<T>;
+  protected readonly options: Readonly<TasqOptions>;
+
+  constructor(options: TasqOptions = {}) {
+    const { blocking = true } = options;
+    this.options = Object.freeze({ blocking });
+  }
 
   isRunning(): boolean {
     return this.running;
@@ -46,8 +71,12 @@ export class Tasq<T> {
     return this.current;
   }
 
-  getIndex(): { items: number; callback: number } {
-    return { items: this.index, callback: this.cbIndex };
+  getIndex(): number {
+    return this.index;
+  }
+
+  getCallbackIndex(): number {
+    return this.callbackIndex;
   }
 
   add(...items: T[]): this {
@@ -89,41 +118,45 @@ export class Tasq<T> {
     return this;
   }
 
-  runAsync(): Promise<TasqResult<T> | undefined>;
+  runAsync(): Promise<TasqRunResult<T> | undefined>;
   runAsync(
     callback: TasqCallback<T>,
     ...callbacks: TasqCallback<any>[]
-  ): Promise<TasqResult<T> | undefined>;
+  ): Promise<TasqRunResult<T> | undefined>;
   async runAsync(
     callback?: TasqCallback<T>,
     ...callbacks: TasqCallback<any>[]
-  ): Promise<TasqResult<T> | undefined> {
+  ): Promise<TasqRunResult<T> | undefined> {
     if (typeof callback === 'function') {
       this.do(callback, ...callbacks);
     }
-    this.cbIndex = 0;
-    if (this.running) {
+    this.callbackIndex = 0;
+    if (this.running && this.options.blocking) {
       return;
     }
+    const nth = ++this.nth;
     try {
       this.running = true;
-      let result: TasqCallbackResult = {};
-      while (!result.break && this.cbIndex < this.callbacks.length) {
-        const cbIndex = this.cbIndex++;
-        const callback = this.callbacks[cbIndex];
+      // don't proceed if first callback can't be fired
+      let result: TasqCallbackResult = {
+        break: this.index >= this.items.length
+      };
+      while (!result.break && this.callbackIndex < this.callbacks.length) {
+        const callbackIndex = this.callbackIndex++;
+        const callback = this.callbacks[callbackIndex];
         // handle first callback
-        while (cbIndex === 0 && this.index < this.items.length) {
+        while (callbackIndex === 0 && this.index < this.items.length) {
           const item = this.items[this.index++];
           this.current = item;
-          result = (await callback(item, this)) || {};
+          result = (await callback({ nth, data: item }, this)) || {};
         }
-        if (cbIndex > 0 && !result.break) {
-          result = (await callback(result.data, this)) || {};
+        if (callbackIndex > 0 && !result.break) {
+          result = (await callback({ nth, data: result.data }, this)) || {};
         }
       }
-      return this.finally();
+      return this.finally(nth);
     } catch (error: unknown) {
-      return this.finally(error, true);
+      return this.finally(nth, error, true);
     }
   }
 
@@ -136,21 +169,40 @@ export class Tasq<T> {
     return items;
   }
 
-  private finally(error?: unknown, didError = false): TasqResult<T> {
+  private finally(
+    nth: number,
+    error?: unknown,
+    didError = false
+  ): TasqRunResult<T> {
+    this.nth = 0;
     this.running = false;
+    const index = this.index - 1;
+    const { callbackIndex } = this;
     const items = this._clear();
-    const result: TasqResult<T> = { items, error, didError };
-    this.finish(result);
-    return result;
+    const doneResult: TasqDoneResult<T> = { nth, items };
+    const runResult: TasqRunResult<T> = { ...doneResult };
+    if (didError) {
+      runResult.error = error;
+    }
+    const errorResult: TasqErrorResult<T> = {
+      ...doneResult,
+      index,
+      callbackIndex
+    };
+    this.finish(doneResult, errorResult, didError);
+    return runResult;
   }
 
-  protected async finish(result: TasqResult<T>): Promise<void> {
-    const { items, error, didError } = result;
+  protected async finish(
+    doneResult: TasqDoneResult<T>,
+    errorResult: TasqErrorResult<T>,
+    didError: boolean
+  ): Promise<void> {
     try {
       if (didError) {
-        await this.onError?.(error, items, this);
+        await this.onError?.(errorResult, this);
       } else {
-        await this.onDone?.(items, this);
+        await this.onDone?.(doneResult, this);
       }
     } catch (error: unknown) {
       const label = didError ? 'error' : 'done';
